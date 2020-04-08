@@ -2,6 +2,7 @@
 # Серверное приложение для соединений
 #
 import asyncio
+import time
 from asyncio import transports
 
 
@@ -22,10 +23,16 @@ class ServerProtocol(asyncio.Protocol):
             self.send_message(decoded)
         else:
             if decoded.startswith("login:"):
-                self.login = decoded.replace("login:", "").replace("\r\n", "")
-                self.transport.write(
-                    f"Привет, {self.login}!\n".encode()
-                )
+                login = decoded.replace("login:", "").replace("\r\n", "")
+                for user in self.server.clients:
+                    if user.login == login:
+                        self.transport.write(f"Логин {login} занят, попробуйте другой.\n".encode())
+                        # time.sleep(5)
+                        self.transport.close()
+                        return
+                self.login = login
+                self.transport.write(f"Привет, {login}!\n".encode())
+                self.send_history()
             else:
                 self.transport.write("Неправильный логин\n".encode())
 
@@ -39,17 +46,27 @@ class ServerProtocol(asyncio.Protocol):
         print("Клиент вышел")
 
     def send_message(self, content: str):
-        message = f"{self.login}: {content}\n"
+        message = f"{self.login}: {content}"
+
+        if len(self.server.history) >= 10:
+            del self.server.history[0]
+        self.server.history.append(message)
 
         for user in self.server.clients:
-            user.transport.write(message.encode())
+            user.transport.write(f"{message}\n".encode())
 
+    def send_history(self):
+        message = ''.join(map(str, self.server.history))
+        num = len(self.server.history)
+        self.transport.write(f"\nПоследние {num} сообщений:\n{message}\n".encode())
 
 class Server:
     clients: list
+    history: list
 
     def __init__(self):
         self.clients = []
+        self.history = []
 
     def build_protocol(self):
         return ServerProtocol(self)
